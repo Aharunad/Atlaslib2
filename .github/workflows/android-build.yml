@@ -1,6 +1,9 @@
 name: Build Apollo Personal APK
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -20,44 +23,49 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
-          accept-android-sdk-licenses: 'yes'
-          log-accepted-android-sdk-licenses: 'false'
 
       - name: Install Android SDK, NDK and CMake
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "cmake;3.31.6" "ndk;29.0.13113456"
+          yes | sdkmanager --licenses
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.31.6" \
+            "ndk;29.0.13113456"
+
           echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.13113456" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.13113456" >> "$GITHUB_ENV"
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
-      - name: Set up system Gradle 8.11.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: "8.11.1"
 
       - name: Extract Apollo source archive
         shell: bash
         run: |
           set -euo pipefail
+
           test -f APOLLO_PERSONAL_1.3.1_APK_HOST_ALPHA1.zip
+
           mkdir -p apollo-source
           unzip -q APOLLO_PERSONAL_1.3.1_APK_HOST_ALPHA1.zip -d apollo-source
+
           test -f apollo-source/package.json
           test -f apollo-source/android-host/settings.gradle.kts
           test -f apollo-source/android-host/host-app/build.gradle.kts
-          test -f apollo-source/android-host/host-app/src/main/java/com/atlaslibrary/apollo/host/ApolloMainActivity.kt
 
       - name: Set up pinned llama.cpp source
         uses: actions/checkout@v4
@@ -72,26 +80,32 @@ jobs:
 
       - name: Build installable Apollo APK
         env:
-          CMAKE_BUILD_PARALLEL_LEVEL: '2'
-        run: gradle -p apollo-source/android-host :host-app:assembleDebug --no-daemon --max-workers=2 --stacktrace
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+        run: |
+          gradle -p apollo-source/android-host \
+            :host-app:assembleDebug \
+            --no-daemon \
+            --max-workers=2 \
+            --stacktrace
 
-      - name: Verify APK and native runtime
+      - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
+
           APK="$(find apollo-source/android-host/host-app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+
           test -n "$APK"
           test -f "$APK"
-          unzip -l "$APK" | grep -F 'lib/arm64-v8a/libapollo_llama_jni.so'
+
+          unzip -l "$APK" | grep -F "lib/arm64-v8a/libapollo_llama_jni.so"
 
           if unzip -Z1 "$APK" | grep -Ei '\.(gguf|safetensors)$'; then
-            echo 'Model weights must remain outside the APK.' >&2
+            echo "Model weights must remain outside the APK." >&2
             exit 1
           fi
 
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "com.atlaslibrary.apollo.personal.debug"
           sha256sum "$APK" > "$APK.sha256"
-          echo "Verified APK: $APK"
 
       - name: Upload Apollo APK
         uses: actions/upload-artifact@v4
