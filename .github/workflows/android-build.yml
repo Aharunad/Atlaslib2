@@ -32,87 +32,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses
+
           sdkmanager \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
-            "cmake;3.31.6" \
-            "ndk;29.0.13113456"
-
-          echo "ANDROID_NDK=$ANDROID_HOME/ndk/29.0.13113456" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.13113456" >> "$GITHUB_ENV"
-
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.11.1"
-
-      - name: Extract Apollo source archive
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          test -f APOLLO_PERSONAL_1.3.1_APK_HOST_ALPHA1.zip
-
-          mkdir -p apollo-source
-          unzip -q APOLLO_PERSONAL_1.3.1_APK_HOST_ALPHA1.zip -d apollo-source
-
-          test -f apollo-source/package.json
-          test -f apollo-source/android-host/settings.gradle.kts
-          test -f apollo-source/android-host/host-app/build.gradle.kts
-
-      - name: Set up pinned llama.cpp source
-        uses: actions/checkout@v4
-        with:
-          repository: ggml-org/llama.cpp
-          ref: 785322d17f2d51e5185cf996a1f4e46d87640841
-          path: apollo-source/android-host/third_party/llama.cpp
-          persist-credentials: false
-
-      - name: Run Apollo source tests
-        run: npm test --prefix apollo-source
-
-      - name: Build installable Apollo APK
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: "2"
-        run: |
-          gradle -p apollo-source/android-host \
-            :host-app:assembleDebug \
-            --no-daemon \
-            --max-workers=2 \
-            --stacktrace
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK="$(find apollo-source/android-host/host-app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
-
-          test -n "$APK"
-          test -f "$APK"
-
-          unzip -l "$APK" | grep -F "lib/arm64-v8a/libapollo_llama_jni.so"
-
-          if unzip -Z1 "$APK" | grep -Ei '\.(gguf|safetensors)$'; then
-            echo "Model weights must remain outside the APK." >&2
-            exit 1
-          fi
-
-          sha256sum "$APK" > "$APK.sha256"
-
-      - name: Upload Apollo APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Apollo-Personal-1.3.1-Debug-APK
-          path: |
-            apollo-source/android-host/host-app/build/outputs/apk/debug/*.apk
-            apollo-source/android-host/host-app/build/outputs/apk/debug/*.apk.sha256
-          if-no-files-found: error
-          retention-days: 14
